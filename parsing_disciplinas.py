@@ -55,26 +55,36 @@ def main():
             for sigla, disciplina in df_limitadas_compartilhadas_bcc_bcd[['Sigla', 'Disciplina']].values
         }
 
-        # 4. Leitura do PDF e/ou da planilha de turmas com as disciplinas disponíveis no quad vigente
-        path_pdf = None
-        path_planilha = None
-        turmas_pattern = re.compile(r'^Turmas\D*(\d{4}\.[1-3])\.xlsx$', re.IGNORECASE)
+        # 4. Leitura dos PDFs de matrículas e das planilhas de planejamento da pasta de arquivos a analisar
+        input_dir = 'arquivos_analise'
 
-        for arquivo in os.listdir():
-            extension_pattern = re.compile(r'.+(\.[a-z]+$)')
-            extension_match = extension_pattern.search(arquivo)
-            extension = extension_match.group(1) if extension_match else ''
+        if not os.path.exists(input_dir):
+            os.makedirs(input_dir)
 
-            if extension == '.pdf' and path_pdf is None:
-                path_pdf = os.path.join(os.getcwd(), arquivo)
+        pdfs = []
+        planilhas = []
+        quad_pattern = re.compile(r'\d{4}\.[1-3]')
 
-            turmas_match = turmas_pattern.search(arquivo)
-            if turmas_match and path_planilha is None:
-                path_planilha = os.path.join(os.getcwd(), arquivo)
-                quad_planilha = turmas_match.group(1)
+        for arquivo in sorted(os.listdir(input_dir)):
+            path_arquivo = os.path.join(os.getcwd(), input_dir, arquivo)
+            extension = os.path.splitext(arquivo)[1].lower()
 
-        if path_pdf is None and path_planilha is None:
-            raise FileNotFoundError('Nenhum PDF de matrículas ou planilha "Turmas <ano>.<quad>.xlsx" encontrado')
+            if arquivo.startswith('~$'):
+                continue
+
+            if extension == '.pdf':
+                pdfs.append(path_arquivo)
+
+            elif extension == '.xlsx':
+                quad_match = quad_pattern.search(arquivo)
+
+                if not quad_match:
+                    raise ValueError(f'Quadrimestre não identificado no nome do arquivo "{arquivo}" (exemplo: "Turmas 2027.3.xlsx")')
+
+                planilhas.append((path_arquivo, quad_match.group()))
+
+        if not pdfs and not planilhas:
+            raise FileNotFoundError(f'Nenhum PDF de matrículas ou planilha de planejamento encontrado na pasta "{input_dir}"')
 
         # 5. Parsing do PDF e/ou da planilha para extrair as disciplinas disponíveis
 
@@ -90,7 +100,7 @@ def main():
 
         analises = []
 
-        if path_pdf:
+        for path_pdf in pdfs:
             pdf_matriculas_disciplinas = PdfReader(path_pdf)
 
             # Captura das disciplinas
@@ -121,7 +131,7 @@ def main():
 
             analises.append(('pdf de matrículas', 'pdf_matriculas', quad_number, disciplinas_disponiveis))
 
-        if path_planilha:
+        for path_planilha, quad_planilha in planilhas:
             df_turmas = pd.read_excel(path_planilha, usecols=['Sigla disciplina'], engine='openpyxl')
 
             disciplinas_planilha = list(dict.fromkeys(
