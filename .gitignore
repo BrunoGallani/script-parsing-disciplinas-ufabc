@@ -1,4 +1,8 @@
 desktop.ini
-*.txt
+analise_disciplinas
 *.pdf
 Turmas 2027.2.xlsx
+CLAUDE.md
+__pycache__
+.venv
+readme.txt

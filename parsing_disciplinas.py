@@ -55,93 +55,120 @@ def main():
             for sigla, disciplina in df_limitadas_compartilhadas_bcc_bcd[['Sigla', 'Disciplina']].values
         }
 
-        # 4. Leitura do PDF com as disciplinas disponíveis no quad vigente
+        # 4. Leitura do PDF e/ou da planilha de turmas com as disciplinas disponíveis no quad vigente
+        path_pdf = None
+        path_planilha = None
+        turmas_pattern = re.compile(r'^Turmas\D*(\d{4}\.[1-3])\.xlsx$', re.IGNORECASE)
+
         for arquivo in os.listdir():
             extension_pattern = re.compile(r'.+(\.[a-z]+$)')
             extension_match = extension_pattern.search(arquivo)
             extension = extension_match.group(1) if extension_match else ''
 
-            if extension == '.pdf':
-                path_arquivo = os.path.join(os.getcwd(), arquivo)
-                break
+            if extension == '.pdf' and path_pdf is None:
+                path_pdf = os.path.join(os.getcwd(), arquivo)
 
-        pdf_matriculas_disciplinas = PdfReader(path_arquivo)
+            turmas_match = turmas_pattern.search(arquivo)
+            if turmas_match and path_planilha is None:
+                path_planilha = os.path.join(os.getcwd(), arquivo)
+                quad_planilha = turmas_match.group(1)
 
-        # 5. Parsing do PDF para extrair as disciplinas limitadas disponíveis
+        if path_pdf is None and path_planilha is None:
+            raise FileNotFoundError('Nenhum PDF de matrículas ou planilha "Turmas <ano>.<quad>.xlsx" encontrado')
 
-        outputs_dir = 'outputs'
-        filename = 'analise_disciplinas.txt'
-        LOG_FILE = os.path.join(outputs_dir, filename)
+        # 5. Parsing do PDF e/ou da planilha para extrair as disciplinas disponíveis
+
+        outputs_dir = 'analise_disciplinas'
 
         if not os.path.exists(outputs_dir):
             os.makedirs(outputs_dir)
-
-        if os.path.exists(LOG_FILE):
-            os.remove(LOG_FILE)
 
         def log(text):
             print(str(text))
             with open(LOG_FILE, 'a') as f:
                 f.write(str(text) + '\n')
 
-        # Captura das disciplinas
-        disciplinas = []
-        for page_number in range(len(pdf_matriculas_disciplinas.pages)):
-            pagina_atual = pdf_matriculas_disciplinas.pages[page_number]
-            texto = pagina_atual.extract_text()
+        analises = []
 
-            disciplina_pattern = re.compile(r'[DN][ABCDEI][0-9]*([A-Z]{3,4}[0-9]{3,4}\-\d{2,})(SA|SB)',
-                                            re.MULTILINE | re.IGNORECASE)
+        if path_pdf:
+            pdf_matriculas_disciplinas = PdfReader(path_pdf)
 
-            for qtd_disciplinas in range(len(disciplina_pattern.findall(texto))):
-                disciplinas.append(disciplina_pattern.findall(texto)[qtd_disciplinas][0].replace('\n', '').strip())
+            # Captura das disciplinas
+            disciplinas = []
+            for page_number in range(len(pdf_matriculas_disciplinas.pages)):
+                pagina_atual = pdf_matriculas_disciplinas.pages[page_number]
+                texto = pagina_atual.extract_text()
 
-        disciplinas_disponiveis = []
-        for disciplina in disciplinas:
-            if disciplina not in disciplinas_disponiveis:
-                disciplinas_disponiveis.append(disciplina)
-        
-        # Captura do quadrimestre atual
-        for page_number in range(len(pdf_matriculas_disciplinas.pages)):
-            pagina_atual = pdf_matriculas_disciplinas.pages[page_number]
-            texto = pagina_atual.extract_text()
+                disciplina_pattern = re.compile(r'[DN][ABCDEI][0-9]*([A-Z]{3,4}[0-9]{3,4}\-\d{2,})(SA|SB)',
+                                                re.MULTILINE | re.IGNORECASE)
 
-            quad_number_pattern = re.compile(r'\d{4}\.[1-3]')
-            quad_number = quad_number_pattern.findall(texto)[0]
-            break
-        
-        log(f"Disciplinas disponíveis - quadrimestre {quad_number}:\n")
-        log("-------------------------------- CIÊNCIA DA COMPUTAÇÃO --------------------------------")
-        log(f'\n{"-"*10} OBRIGATÓRIAS {"-"*10}\n')
-        for disciplina in disciplinas_disponiveis:
-            if obrigatorias_bcc.get(disciplina):
-                log(obrigatorias_bcc.get(disciplina))
+                for qtd_disciplinas in range(len(disciplina_pattern.findall(texto))):
+                    disciplinas.append(disciplina_pattern.findall(texto)[qtd_disciplinas][0].replace('\n', '').strip())
 
-        log(f'\n{"-"*10} LIMITADAS {"-"*10}\n')
-        for disciplina in disciplinas_disponiveis:
-            if limitadas_bcc.get(disciplina):
-                log(limitadas_bcc.get(disciplina))
+            disciplinas_disponiveis = []
+            for disciplina in disciplinas:
+                if disciplina not in disciplinas_disponiveis:
+                    disciplinas_disponiveis.append(disciplina)
 
-        log("\n-------------------------------- CIÊNCIA DE DADOS --------------------------------")
-        log(f'\n{"-"*10} OBRIGATÓRIAS {"-"*10}\n')
-        for disciplina in disciplinas_disponiveis:
-            if obrigatorias_bcd.get(disciplina):
-                log(obrigatorias_bcd.get(disciplina))
+            # Captura do quadrimestre atual
+            for page_number in range(len(pdf_matriculas_disciplinas.pages)):
+                pagina_atual = pdf_matriculas_disciplinas.pages[page_number]
+                texto = pagina_atual.extract_text()
 
-        log(f'\n{"-"*10} LIMITADAS {"-"*10}\n')
-        for disciplina in disciplinas_disponiveis:
-            if limitadas_bcd.get(disciplina):
-                log(limitadas_bcd.get(disciplina))
+                quad_number_pattern = re.compile(r'\d{4}\.[1-3]')
+                quad_number = quad_number_pattern.findall(texto)[0]
+                break
 
-        log("\n-------------------------------- LIMITADAS DE AMBOS OS CURSOS --------------------------------\n")
-        for disciplina in disciplinas_disponiveis:
-            if limitadas_bcc_bcd.get(disciplina):
-                log(limitadas_bcc_bcd.get(disciplina))
+            analises.append(('pdf de matrículas', 'pdf_matriculas', quad_number, disciplinas_disponiveis))
 
-        print("-" * 10)
-        print(f'Arquivo salvo em: {os.path.abspath(LOG_FILE)}')
+        if path_planilha:
+            df_turmas = pd.read_excel(path_planilha, usecols=['Sigla disciplina'], engine='openpyxl')
 
-        pag.alert('''Verifique os resultados, e quando terminar, clique em "ok".''',
+            disciplinas_planilha = list(dict.fromkeys(
+                df_turmas['Sigla disciplina'].dropna().astype(str).str.strip()
+            ))
+
+            analises.append(('planilha de planejamento', 'planilha_planejamento', quad_planilha, disciplinas_planilha))
+
+        for origem, sufixo_arquivo, quad_number, disciplinas_disponiveis in analises:
+            filename = f'{sufixo_arquivo}_{quad_number.replace(".", "-")}.txt'
+            LOG_FILE = os.path.join(outputs_dir, filename)
+
+            if os.path.exists(LOG_FILE):
+                os.remove(LOG_FILE)
+
+            log(f"Disciplinas disponíveis - quadrimestre {quad_number} ({origem}):\n")
+            log("-------------------------------- CIÊNCIA DA COMPUTAÇÃO --------------------------------")
+            log(f'\n{"-"*10} OBRIGATÓRIAS {"-"*10}\n')
+            for disciplina in disciplinas_disponiveis:
+                if obrigatorias_bcc.get(disciplina):
+                    log(obrigatorias_bcc.get(disciplina))
+
+            log(f'\n{"-"*10} LIMITADAS {"-"*10}\n')
+            for disciplina in disciplinas_disponiveis:
+                if limitadas_bcc.get(disciplina):
+                    log(limitadas_bcc.get(disciplina))
+
+            log("\n-------------------------------- CIÊNCIA DE DADOS --------------------------------")
+            log(f'\n{"-"*10} OBRIGATÓRIAS {"-"*10}\n')
+            for disciplina in disciplinas_disponiveis:
+                if obrigatorias_bcd.get(disciplina):
+                    log(obrigatorias_bcd.get(disciplina))
+
+            log(f'\n{"-"*10} LIMITADAS {"-"*10}\n')
+            for disciplina in disciplinas_disponiveis:
+                if limitadas_bcd.get(disciplina):
+                    log(limitadas_bcd.get(disciplina))
+
+            log("\n-------------------------------- LIMITADAS DE AMBOS OS CURSOS --------------------------------\n")
+            for disciplina in disciplinas_disponiveis:
+                if limitadas_bcc_bcd.get(disciplina):
+                    log(limitadas_bcc_bcd.get(disciplina))
+
+            print("-" * 10)
+            print(f'Arquivo salvo em: {os.path.abspath(LOG_FILE)}')
+
+        pag.alert('''Verifique os resultados no terminal e na pasta \"analise_disciplinas\".''',
                 title = 'Fim da automação')
     
     except Exception as e:
